@@ -31,7 +31,6 @@ my %WriteMakefileArgs = (
     "Exporter" => 0,
     "Fcntl" => 0,
     "File::Basename" => 0,
-    "File::Find" => 0,
     "File::Spec::Functions" => 0,
     "FindBin" => 0,
     "Getopt::Long" => 0,
@@ -41,12 +40,11 @@ my %WriteMakefileArgs = (
     "Sys::Hostname" => 0,
     "Term::ReadLine" => 0,
     "Time::HiRes" => 0,
-    "base" => 0,
     "constant" => 0,
     "strict" => 0,
     "warnings" => 0
   },
-  "VERSION" => "6.00",
+  "VERSION" => "6.01",
   "test" => {
     "TESTS" => "t/*.t"
   }

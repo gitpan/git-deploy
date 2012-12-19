@@ -47,7 +47,6 @@ local $SIG{__DIE__} = sub {
 use Git::Deploy::Say;
 use Git::Deploy;
 
-
 # debugging
 use Data::Dumper qw(Dumper);
 
@@ -223,7 +222,7 @@ sub do_interactive_revert {
                     or _warn "Failed to create revert tag! This shouldn't happen! Ignoring, but this should be fixed!\n";
     _tell("Marked $printed[0] as reverted with tag $revert_tag");
 
-    reset_to_name( $printed[ $input - 1 ], $prefix );
+    reset_to_name( $action, $printed[ $input - 1 ], $prefix );
     my $sync_hook= get_sync_hook( $prefix );
     if ($sync_hook) {
         return "sync";                        # they have a sync hook, so call it.
@@ -260,20 +259,32 @@ sub do_sync_with_sync_hook {
 
         1;
     } or do {
-        my $support_email= get_config('support-email','maintainer');
+
+        my $sync_hook_fail_message = get_config(
+            'message-on-sync-hook-fail-whale',
+            "A) Retry the synchronization hook. You can do this by moving to the root of the repository\n" .
+            "   and executing the following command by hand:\n\n" .
+            "   \$ {SYNC_HOOK}\n\n" .
+            "   which if it succeeds can be followed with a\n\n" .
+            "   \$ git-deploy finish\n\n" .
+            "   If that doesn't work then you should seek further assistance from sysadmin.\n" .
+            "   * NOTE * This is NOT an error in git-deploy itself.\n\n" .
+            "B) Inform {SUPPORT_EMAIL} of the failure and any relevant\n" .
+            "   output there might be. Please do this even if the manual process works out.\n\n"
+        );
+        _expand_template_variables(
+            \$sync_hook_fail_message,
+            {
+                SYNC_HOOK => $sync_hook,
+                SUPPORT_EMAIL => get_config('support-email','maintainer'),
+            }
+        );
+
         _tell
             "The syncronization hook has returned failure: $@\n\n",
             "                         *** DON'T PANIC ***\n\n",
-            "You will now be dropped into 'manual' sync mode. In most cases of failure you should:\n\n",
-            "A) Retry the synchronization hook. You can do this by moving to the root of the repository\n",
-            "   and executing the following command by hand:\n\n",
-            "   \$ $sync_hook\n\n",
-            "   which if it succeeds can be followed with a\n\n",
-            "   \$ git-deploy finish\n\n",
-            "   If that doesn't work then you should seek further assistance from sysadmin.\n",
-            "   * NOTE * This is NOT an error in git-deploy itself.\n\n",
-            "B) Inform $support_email of the failure and any relevant\n",
-            "   output there might be. Please do this even if the manual process works out.\n\n";
+            "You will now be dropped into 'manual' sync mode. Please follow these instructions:\n\n",
+            $sync_hook_fail_message;
 
         if ($disable_further_actions_if_not_ok) {
             # disable any further actions as requested.
@@ -519,6 +530,7 @@ if ($show_prefix) {
         exit(1);
     }
 }
+
 if ($show_hook_dir) {
 
     if (my $hook_dir = get_hook_dir($prefix, 1)) {
@@ -530,6 +542,7 @@ if ($show_hook_dir) {
         exit(1);
     }
 }
+
 if ($show_deploy_file) {
     $deploy_file_name ||= get_deploy_file_name();
     if ($start_tag) {
@@ -562,6 +575,7 @@ if ($show_deploy_file) {
         exit(1);
     }
 }
+
 if ( $action eq 'status' ) {
     my $status= read_rollout_status();
     my $exit_val= 0;
@@ -587,6 +601,7 @@ if ( $action eq 'status' ) {
     }
     exit($exit_val);
 }
+
 my @extra= @ARGV;
 if ( $git_wrap{$action} ) {
     if ( !$start_tag ) {
@@ -599,16 +614,19 @@ if ( $git_wrap{$action} ) {
         exec( "git", $action, @extra, "$start_tag..HEAD" );
     }
 }
+
 if ( $action eq 'modified' ) {
     show_modified( $start_tag, $rollout_tag );
     exit;
 }
+
 my $revert_choice;
 if ( $action eq 'revert' ) {
     if (@ARGV) {
         $revert_choice = shift @ARGV;
     }
 }
+
 if (@ARGV) {
     pod2usage("Too many arguments.");
 }
@@ -621,7 +639,6 @@ if ( !$prefix ) {
         . "    git config deploy.tag-prefix PREFIX\n\n"
         . "to configure this repository for deployment, or provide one on the command line.\n";
 }
-
 
 if ( $list || $show_tag ) {
     my $head_refs= do_get_name_list( $ignore_older_than, $list, $list_all, $include_branches );
@@ -677,7 +694,6 @@ if ( $make_tag or $action eq 'tag' ) {
     exit(0);
 }
 
-
 ###################################################################################
 # At this point we are have been asked to do a rollout step and we are in a clean
 # working directory. Depending on which $action they request we do different things
@@ -689,6 +705,7 @@ if ( $action eq 'release' ) {
         unless get_config_bool("can-make-tags",'false');
     push @actions, "finish";
 }
+
 while (@actions) {
     my $final_words= "";    #any messages to display at the end of the rollout - distinct from yay message
     my $action= shift @actions;
@@ -701,18 +718,21 @@ while (@actions) {
 
 ######################################################
     if ( $action eq 'start' or $action eq 'revert' or $action eq 'hotfix' ) {
+
+	# these will die if there is a problem
+	execute_deploy_hooks(
+	    action  => $action,
+	    phase   => "pre-start",
+	    prefix  => $prefix,
+	);
+
         should_write_timings();
+
         write_rollout_status(
             "start", $force,
             sub {
                 _checktag( $action, 'start', $start_tag, 0 );
                 _checktag( $action, 'rollout',  $rollout_tag,  0 );
-
-                # these will die if there is a problem
-                execute_deploy_hooks(
-                    phase   => "pre-start",
-                    prefix  => $prefix,
-                );
             } );    # this will die if there is a problem
         do_fetch($remote_site);
 
@@ -735,6 +755,7 @@ while (@actions) {
         my $first_line;
         # these will die if there is a problem
         execute_deploy_hooks(
+            action  => $action,
             phase     => "pre-pull",
             prefix    => $prefix,
             start_tag => $start_tag,
@@ -743,6 +764,7 @@ while (@actions) {
         _info `git remote prune origin`;
         if ( $action eq 'revert' ) {
             execute_log_hooks(
+                action       => $action,
                 prefix       => $prefix,
                 log_announce => 1,
                 log_level    => "info",
@@ -755,6 +777,7 @@ while (@actions) {
         }
         elsif ( $action eq 'start' ) {
             execute_log_hooks(
+                action       => $action,
                 prefix       => $prefix,
                 log_announce => 1,
                 log_level    => "info",
@@ -767,6 +790,7 @@ while (@actions) {
 
             # these will die if there is a problem
             execute_deploy_hooks(
+                action    => $action,
                 phase     => $_,
                 prefix    => $prefix,
                 start_tag => $start_tag,
@@ -779,6 +803,7 @@ while (@actions) {
         }
         elsif ( $action eq 'hotfix' ) {
             execute_log_hooks(
+                action       => $action,
                 prefix       => $prefix,
                 log_announce => 1,
                 log_level    => "info",
@@ -812,8 +837,12 @@ while (@actions) {
                 ;
         }
 
-        # XXX: this is a cheap an easy way to silence the mails for this action
-        # by request of liz and the teamleaders.
+        execute_deploy_hooks(
+            action      => $action,
+            phase       => "post-start",
+            prefix      => $prefix,
+            start_tag   => $start_tag,
+        );
 ######################################################
     }
     elsif ( $action eq 'sync' or $action eq 'release' or $action eq 'manual-sync' ) {
@@ -847,6 +876,7 @@ while (@actions) {
 
                 # these will die if there is a problem
                 execute_deploy_hooks(
+                    action  => $action,
                     phase   => "pre-sync",
                     prefix  => $prefix,
                     start_tag => $start_tag,
@@ -888,6 +918,7 @@ while (@actions) {
             ;
 
             execute_log_hooks(
+                action       => $action,
                 prefix       => $prefix,
                 log_announce => 1,
                 log_level    => "info",
@@ -915,6 +946,7 @@ while (@actions) {
             _tell "You must now hand execute the synchronization process and then execute git-deploy finish\n";
 
             execute_log_hooks(
+                action       => $action,
                 prefix       => $prefix,
                 log_announce => 1,
                 log_level    => "info",
@@ -924,9 +956,10 @@ while (@actions) {
 
         # these will die if there is a problem - should they be executed if the sync failed?
         execute_deploy_hooks(
-            phase   => "post-sync",
-            prefix  => $prefix,
-            start_tag => $start_tag,
+            action      => $action,
+            phase       => "post-sync",
+            prefix      => $prefix,
+            start_tag   => $start_tag,
             rollout_tag => $rollout_tag,
         );
 ######################################################
@@ -942,7 +975,7 @@ while (@actions) {
             } );
 
         _say "Rolling back to $start_tag\n";
-        reset_to_name( $start_tag, $prefix );
+        reset_to_name( $action, $start_tag, $prefix );
         my $deploy_text= "";
         if ( !$rollout_tag ) {
 
@@ -954,6 +987,7 @@ while (@actions) {
             }
             $deploy_text= write_deploy_file( $start_tag, \@message, $deploy_file_name );
             execute_log_hooks(
+                action       => $action,
                 prefix       => $prefix,
                 log_announce => 1,
                 log_level    => "info",
@@ -981,6 +1015,7 @@ while (@actions) {
             if ( my $sync_hook= get_sync_hook( $prefix ) ) {
                 _info "Will automatically execute $sync_hook to update servers\n";
                 execute_log_hooks(
+                    action       => $action,
                     prefix       => $prefix,
                     log_announce => 1,
                     log_level    => "info",
@@ -1002,6 +1037,7 @@ while (@actions) {
                 };
             } else {
                 execute_log_hooks(
+                    action       => $action,
                     prefix       => $prefix,
                     log_announce => 1,
                     log_level    => "warning",
@@ -1012,6 +1048,7 @@ while (@actions) {
         }
 
         execute_deploy_hooks(
+            action  => $action,
             phase   => "post-abort",
             prefix  => $prefix,
         );
@@ -1022,6 +1059,7 @@ while (@actions) {
     }
     elsif ( $action eq 'finish' ) {
         execute_log_hooks(
+            action       => $action,
             prefix       => $prefix,
             log_announce => 1,
             log_level    => "info",
@@ -1086,6 +1124,7 @@ while (@actions) {
         my $msg = "'$action' for '$prefix' had problems\n$final_words";
         _warn $msg;
         execute_log_hooks(
+            action       => $action,
             prefix       => $prefix,
             log_announce => 1,
             log_level    => "warning",
@@ -1097,6 +1136,7 @@ while (@actions) {
         $rollout_tag and $msg .= " (now at $rollout_tag)";
         _yay "$msg\n";
         execute_log_hooks(
+            action       => $action,
             prefix       => $prefix,
             log_announce => 1,
             log_level    => "info",
@@ -1725,6 +1765,16 @@ specify a common place for multiple repositories to share for this
 purpose, providing an "interlock" behaviour that prevents more than
 one of the repositories being rolled out at once.
 
+=head3 deploy.message-on-sync-hook-fail-whale
+
+A message you can specify which'll be output when we fail to run the
+sync hook instead of the default message. You can put any
+site-specific instructions here to replace the defaults.
+
+The strings C<{SYNC_HOOK}> and C<{SUPPORT_EMAIL}> in that message will
+be replaced with the sync hook that was run and the support E-Mail
+specified in L</deploy.support-email>.
+
 =head1 EXAMPLE CONFIGURATION
 
 Here's an example git-deploy configuration that can deal with rolling
@@ -1851,6 +1901,10 @@ hooks. Note that the hooks B<MUST> have their executable bit set.
 
 The following environment variables are available to the phase hooks:
 
+=head3 GIT_DEPLOY_ACTION
+
+The current action we're running, e.g. "start", "hotfix", "abort" etc.
+
 =head3 GIT_DEPLOY_PHASE
 
 The current hook phase, e.g. "post-pull", "pre-sync" etc.
@@ -1885,6 +1939,12 @@ git-deploy actions:
 
 The first hook to be executed. Will be run before the deployment tag
 is created (but obviously, after we do C<git fetch>).
+
+=head3 post-start
+
+Executed after the start phase (also executed on hotfix), useful to
+e.g. print out any custom messages you'd like to print out at the end
+of the start/hotfix phase.
 
 =head3 pre-pull
 
@@ -1982,4 +2042,22 @@ Note: the sync hook can be skipped (and the associated finish) with the
 manual-sync action. This will however execute the pre-sync and post-sync
 hooks, possibly with errors.
 
+=head1 DETAILS
+
+=head2 Source Code Repository
+
+git-deploy master development repository is hosted by GitHub at:
+
+    https://github.com/git-deploy/git-deploy
+
+The authors would like to thank GitHub for their support of the open source
+community.
+
+=head2 LICENSE
+
+This software is licensed under the same terms as the Perl language.
+See http://dev.perl.org/licenses/ for details.
+
 =cut
+
+# vim: filetype=perl tabstop=4 shiftwidth=4 expandtab:

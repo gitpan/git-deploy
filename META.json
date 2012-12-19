@@ -27,7 +27,6 @@
             "Exporter" : "0",
             "Fcntl" : "0",
             "File::Basename" : "0",
-            "File::Find" : "0",
             "File::Spec::Functions" : "0",
             "FindBin" : "0",
             "Getopt::Long" : "0",
@@ -37,7 +36,6 @@
             "Sys::Hostname" : "0",
             "Term::ReadLine" : "0",
             "Time::HiRes" : "0",
-            "base" : "0",
             "constant" : "0",
             "strict" : "0",
             "warnings" : "0"
@@ -65,6 +63,6 @@
          "web" : "https://github.com/git-deploy/git-deploy"
       }
    },
-   "version" : "6.00"
+   "version" : "6.01"
 }
 
